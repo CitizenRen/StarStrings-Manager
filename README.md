@@ -4,6 +4,9 @@ A small Windows app that installs and keeps [MrKraken's StarStrings](https://git
 
 StarStrings is a community-made `global.ini` that adds useful information to in-game text: blueprint rewards on contracts, component sizes and grades, mining info and more. It has to be updated after every game patch, and StarStrings Manager takes care of that for you.
 
+> [!NOTE]
+> StarStrings Manager is an independent, open-source fan project made to make installing and updating StarStrings easier. I'm not affiliated with MrKraken or the StarStrings project, and this app isn't made or endorsed by them. StarStrings itself is MrKraken's work.
+
 <p align="center"><img src="docs/screenshot.png" alt="StarStrings Manager" width="440"></p>
 
 ## Features
@@ -70,14 +73,6 @@ src/
   requirements.txt    build dependencies
 ```
 
-### Releasing a new version
-
-1. Raise `APP_VERSION` in `src/core.py`.
-2. Run `src\build.bat`.
-3. Create a GitHub release tagged `vX.Y.Z` (it must be higher than the previous one) and attach the exe.
-
-Older copies of the app will then show the update in their footer.
-
 ## Credits
 
 - **StarStrings Manager** by [CitizenRen](https://github.com/CitizenRen)
@@ -86,4 +81,6 @@ Older copies of the app will then show the update in their footer.
 
 ## Disclaimer
 
-This is an unofficial Star Citizen fan project. It is not affiliated with or endorsed by the Cloud Imperium group of companies. StarStrings is a third-party community file; use it at your own discretion. CIG may ask for community localisation files to stop being distributed at any time.
+StarStrings Manager is an independent, open-source fan project made to make installing and updating StarStrings easier. Its author (CitizenRen) is not affiliated with MrKraken or the StarStrings project, and the app is not made, maintained or endorsed by them. Please don't report problems with this app to MrKraken; use this repo's [issues page](https://github.com/CitizenRen/StarStrings-Manager/issues) instead.
+
+This is also an unofficial Star Citizen fan project. It is not affiliated with or endorsed by the Cloud Imperium group of companies.
