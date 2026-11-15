@@ -10,14 +10,16 @@ import re
 import shutil
 import string
 import tempfile
+import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 APP_NAME = "StarStrings Manager"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_REPO = "CitizenRen/StarStrings-Manager"  # owner/name of this app's GitHub repo
 APP_REPO_URL = f"https://github.com/{APP_REPO}"
 
@@ -29,6 +31,8 @@ SS_REPO_URL = f"https://github.com/{SS_REPO}"
 SS_RELEASE_TAG = "latest"  # LIVE build release
 SS_ASSET_NAME = "StarStrings-LIVE.zip"
 SS_README_URL = f"https://raw.githubusercontent.com/{SS_REPO}/master/readme.md"
+SS_FEED_URL = f"https://github.com/{SS_REPO}/releases.atom"
+SS_DOWNLOAD_URL = f"https://github.com/{SS_REPO}/releases/download/{SS_RELEASE_TAG}/{SS_ASSET_NAME}"
 
 USER_AGENT = f"StarStrings-Manager/{APP_VERSION}"
 MARKER_NAME = ".starstrings_manager.json"
@@ -55,14 +59,21 @@ def save_settings(data: dict) -> None:
 
 
 # --------------------------------------------------------------------------- http
-def _get(url: str, accept: str = "application/vnd.github+json", timeout: int = 15) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+# Only public github.com pages/feeds/downloads are used, never api.github.com, whose
+# unauthenticated limit (60 requests/hour per IP) is easy to hit on shared connections.
+def _get(url: str, timeout: int = 15) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
-def _get_json(url: str):
-    return json.loads(_get(url).decode("utf-8"))
+def describe_error(err: Exception) -> str:
+    """Short, user-facing explanation of a network error (fits the one-line status)."""
+    if isinstance(err, urllib.error.HTTPError):
+        return "GitHub rate limit reached" if err.code in (403, 429) else f"GitHub error {err.code}"
+    if isinstance(err, (urllib.error.URLError, TimeoutError, ConnectionError)):
+        return "Can't reach GitHub, check your connection"
+    return str(err)
 
 
 # --------------------------------------------------------------------------- game detection
@@ -259,16 +270,29 @@ def pretty_release(release: str, published: str = "") -> str:
     return release or (published[:10] if published else "Unknown")
 
 
+def latest_to_dict(latest: LatestRelease) -> dict:
+    return asdict(latest)
+
+
+def latest_from_dict(data: dict) -> LatestRelease:
+    data = dict(data)
+    data["built_for"] = GameVersion(**data.get("built_for", {}))
+    return LatestRelease(**data)
+
+
 def fetch_latest() -> LatestRelease:
-    rel = _get_json(f"https://api.github.com/repos/{SS_REPO}/releases/tags/{SS_RELEASE_TAG}")
-    asset = next((a for a in rel.get("assets", []) if a["name"].lower() == SS_ASSET_NAME.lower()), None)
-    if asset is None:
-        raise RuntimeError(f"{SS_ASSET_NAME} not found in the latest release")
-    m = re.search(r"\((release-[^)]+)\)", rel.get("name", ""))
-    release_id = m.group(1) if m else (asset.get("updated_at") or rel.get("published_at", ""))
-    latest = LatestRelease(release_id, asset.get("updated_at", ""), asset["browser_download_url"], asset.get("size", 0))
+    """Latest StarStrings LIVE release, read from the repo's public releases feed."""
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    feed = ET.fromstring(_get(SS_FEED_URL))
+    entry = next((e for e in feed.findall("a:entry", ns)
+                  if (e.findtext("a:id", "", ns)).endswith(f"/{SS_RELEASE_TAG}")), None)
+    if entry is None:
+        raise RuntimeError("The StarStrings LIVE release wasn't found on GitHub")
+    title, updated = entry.findtext("a:title", "", ns), entry.findtext("a:updated", "", ns)
+    m = re.search(r"\((release-[^)]+)\)", title)  # "SC LIVE Build (release-2026-11-12-2c6c06f)"
+    latest = LatestRelease(m.group(1) if m else updated, updated, SS_DOWNLOAD_URL, 0)
     try:  # which game build the strings were generated from (from the repo readme)
-        text = _get(SS_README_URL, accept="text/plain").decode("utf-8", "ignore")
+        text = _get(SS_README_URL).decode("utf-8", "ignore")
         mm = re.search(r"Build:\s*(sc-alpha-[\d.]+)_\w+?_(\d+)", text)
         if mm:
             latest.built_for = GameVersion(mm.group(1), mm.group(2))
@@ -283,14 +307,18 @@ def _ver_tuple(v: str) -> tuple:
 
 
 def check_app_update() -> Optional[tuple[str, str]]:
-    """Return (version, url) if a newer app release exists, else None."""
+    """Return (version, url) if a newer app release exists, else None.
+    github.com/<repo>/releases/latest redirects to .../releases/tag/<tag> (no API needed)."""
     try:
-        rel = _get_json(f"https://api.github.com/repos/{APP_REPO}/releases/latest")
+        req = urllib.request.Request(f"{APP_REPO_URL}/releases/latest", method="HEAD",
+                                     headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            url = r.geturl()
     except Exception:
         return None
-    tag = rel.get("tag_name", "")
-    if tag and _ver_tuple(tag) > _ver_tuple(APP_VERSION):
-        return tag.lstrip("vV"), rel.get("html_url", APP_REPO_URL + "/releases")
+    m = re.search(r"/releases/tag/([^/?#]+)", url)
+    if m and _ver_tuple(m.group(1)) > _ver_tuple(APP_VERSION):
+        return m.group(1).lstrip("vV"), url
     return None
 
 

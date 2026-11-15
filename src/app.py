@@ -7,6 +7,7 @@ import queue
 import sys
 import threading
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog
 
@@ -449,10 +450,23 @@ class App(ctk.CTk):
         def done(latest, err):
             self.check_btn.configure(state="normal")
             if err:
-                self.latest_error = str(err)
-                self.msg.configure(text=f"Couldn't reach GitHub: {err}", text_color=RED)
+                self.latest_error = core.describe_error(err)
+                cached = self.settings.get("latest_cache")
+                if cached and not self.latest:  # fall back to the last successful check
+                    try:
+                        self.latest = core.latest_from_dict(cached["release"])
+                    except (KeyError, TypeError):
+                        pass
+                if cached and self.latest:
+                    self.msg.configure(text=f"{self.latest_error}, using last check ({cached['checked']})",
+                                       text_color=AMBER)
+                else:
+                    self.msg.configure(text=f"{self.latest_error}. Try again later.", text_color=RED)
             else:
                 self.latest, self.latest_error = latest, None
+                self.settings["latest_cache"] = {"release": core.latest_to_dict(latest),
+                                                 "checked": datetime.now().strftime("%d %b %H:%M")}
+                core.save_settings(self.settings)
                 self.msg.configure(text="Checked just now.", text_color=MUTED)
             self._render()
 
@@ -594,7 +608,7 @@ class App(ctk.CTk):
         self._render()
 
     def _show_error(self, title, err, game):
-        text = str(err)
+        text = core.describe_error(err)
         if isinstance(err, PermissionError):
             text = (f"Windows blocked writing to:\n{game}\n\n"
                     "Close Star Citizen, or right-click StarStrings Manager and choose "
